@@ -1,10 +1,11 @@
 name: CAS CLI - Windows x64 smoke test
 
 on:
+  # Manual run
   workflow_dispatch:
     inputs:
       directory:
-        description: 'Path to scan (relative to repo, or absolute Windows path)'
+        description: 'Path to scan (relative or absolute Windows path)'
         required: false
         default: '.'
       repo_id:
@@ -24,6 +25,14 @@ on:
         required: false
         default: 'GIT_HOOK'
 
+  # Auto-run on push
+  push:
+    branches: [ dev ]             # <- change to your branch(es), e.g. [ dev, main ]
+    paths:
+      - 'cas.tgz'                 # run when the artifact changes
+      - '.github/workflows/win-amd.yml'
+      - 'git-hist/**'             # or any other paths that should trigger a run
+
 permissions:
   contents: read
 
@@ -31,6 +40,7 @@ jobs:
   win-amd64:
     runs-on: windows-latest
     timeout-minutes: 30
+
     steps:
       - name: Checkout repo
         uses: actions/checkout@v4
@@ -51,7 +61,7 @@ jobs:
             exit 1
           }
 
-      - name: Unblock extracted files (remove Zone.Identifier)
+      - name: Unblock extracted files
         shell: pwsh
         run: |
           if (Test-Path .\exe)     { Get-ChildItem -Recurse .\exe     | Unblock-File }
@@ -61,17 +71,13 @@ jobs:
         id: pick
         shell: pwsh
         run: |
-          if     (Test-Path .\exe\cas.exe)     { "$env:CAS_EXE=.\exe\cas.exe"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append }
-          elseif (Test-Path .\exe-arm\cas.exe) { "$env:CAS_EXE=.\exe-arm\cas.exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append }
+          if     (Test-Path .\exe\cas.exe)     { "CAS_EXE=.\exe\cas.exe"     | Out-File -Append -FilePath $env:GITHUB_OUTPUT }
+          elseif (Test-Path .\exe-arm\cas.exe) { "CAS_EXE=.\exe-arm\cas.exe" | Out-File -Append -FilePath $env:GITHUB_OUTPUT }
           else { Write-Error "cas.exe not found"; exit 1 }
-      - name: Sanity
-        shell: pwsh
-        run: |
-          Write-Host "Using ${{ steps.pick.outputs.CAS_EXE }}"
-          Get-ChildItem -Recurse (Split-Path -Parent "${{ steps.pick.outputs.CAS_EXE }}") | Select-Object FullName,Length
 
       - name: Resolve scan directory
         id: scandir
+        if: ${{ github.event_name == 'workflow_dispatch' }}
         shell: pwsh
         run: |
           $inp = '${{ github.event.inputs.directory }}'
@@ -80,24 +86,31 @@ jobs:
           } elseif (Test-Path $inp) {
             $full = (Resolve-Path $inp).Path
           } else {
-            # Treat as relative to workspace
             $full = (Resolve-Path (Join-Path $env:GITHUB_WORKSPACE $inp)).Path
           }
-          "DIR=$full" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
-          Write-Host "Scan directory: $full"
+          "DIR=$full" | Out-File -Append -FilePath $env:GITHUB_OUTPUT
+
+      - name: Default scan directory on push
+        id: scandir_default
+        if: ${{ github.event_name == 'push' }}
+        shell: pwsh
+        run: |
+          "DIR=$((Resolve-Path .).Path)" | Out-File -Append -FilePath $env:GITHUB_OUTPUT
 
       - name: Run CAS
         shell: pwsh
         env:
-          CAS_API_KEY: ${{ secrets.CAS_API_KEY }}   # <-- add this repo secret
+          CAS_API_KEY: ${{ secrets.CAS_API_KEY }}   # add in repo settings
         run: |
-          Set-StrictMode -Version Latest
+          $dir = '${{ steps.scandir.outputs.DIR }}'
+          if ([string]::IsNullOrWhiteSpace($dir)) { $dir = '${{ steps.scandir_default.outputs.DIR }}' }
+
           & "${{ steps.pick.outputs.CAS_EXE }}" `
             --api-base-url "https://api-viso-ddk8ww8iuhyvvnnq5ayhr4.xdr-qa2-uat.us.paloaltonetworks.com" `
             --api-key "$env:CAS_API_KEY" `
             --auth-id 4 `
-            --repo-id "${{ github.event.inputs.repo_id }}" `
-            --branch "${{ github.event.inputs.branch }}" `
-            --directory "${{ steps.scandir.outputs.DIR }}" `
-            --source "${{ github.event.inputs.source }}" `
-            --start-commit "${{ github.event.inputs.start_commit }}"
+            --repo-id "${{ github.event.inputs.repo_id || 'test/may' }}" `
+            --branch "${{ github.event.inputs.branch   || 'dev' }}" `
+            --directory "$dir" `
+            --source "${{ github.event.inputs.source   || 'GIT_HOOK' }}" `
+            --start-commit "${{ github.event.inputs.start_commit || '74d51d7a11a89e678722ea62b52e908b181dee76' }}"
