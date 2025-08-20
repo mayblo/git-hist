@@ -11,27 +11,46 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          lfs: true  # pulls real file if cas.tgz is tracked via Git LFS
+          lfs: true
 
-      - name: Extract cas.tgz
+      - name: Ensure cas.tgz is fetched via LFS
         shell: pwsh
-        run: tar -xzf .\cas.tgz
+        run: |
+          git lfs pull --exclude="" --include="cas.tgz"
+          if (-not (Test-Path .\cas.tgz)) { Write-Error "cas.tgz not found"; exit 1 }
+          Get-Item .\cas.tgz | Format-List FullName,Length
 
-      - name: Unblock files (avoid SmartScreen)
+      - name: Extract cas.tgz (fallback to zip if needed)
         shell: pwsh
-        run: Get-ChildItem -Recurse .\exe* | Unblock-File
+        run: |
+          $ok = $true
+          try { tar -tzf .\cas.tgz | Select-Object -First 1 | Out-Null } catch { $ok = $false }
+          if ($ok) {
+            tar -xzf .\cas.tgz
+          } else {
+            try { Expand-Archive -Path .\cas.tgz -DestinationPath . -Force } catch {
+              Write-Error "cas.tgz is neither a valid .tgz nor .zip"; exit 1
+            }
+          }
+
+      - name: Unblock files
+        shell: pwsh
+        run: Get-ChildItem -Recurse .\exe* -ErrorAction SilentlyContinue | Unblock-File
 
       - name: Run CAS
         shell: pwsh
         env:
           CAS_API_KEY: ${{ secrets.CAS_API_KEY }}
-        run: >
-          .\exe-arm\cas.exe
-          --api-base-url https://api-viso-ddk8ww8iuhyvvnnq5ayhr4.xdr-qa2-uat.us.paloaltonetworks.com
-          --api-key "$env:CAS_API_KEY"
-          --auth-id 4
-          --repo-id test/may
-          --branch dev
-          --directory "${{ github.workspace }}"
-          --source GIT_HOOK
-          --start-commit 74d51d7a11a89e678722ea62b52e908b181dee76
+        run: |
+          $exe = ".\exe-arm\cas.exe"
+          if (-not (Test-Path $exe)) { $exe = ".\exe\cas.exe" }
+          if (-not (Test-Path $exe)) { Write-Error "cas.exe not found"; exit 1 }
+          & $exe `
+            --api-base-url https://api-viso-ddk8ww8iuhyvvnnq5ayhr4.xdr-qa2-uat.us.paloaltonetworks.com `
+            --api-key "$env:CAS_API_KEY" `
+            --auth-id 4 `
+            --repo-id test/may `
+            --branch dev `
+            --directory "${{ github.workspace }}" `
+            --source GIT_HOOK `
+            --start-commit 74d51d7a11a89e678722ea62b52e908b181dee76
