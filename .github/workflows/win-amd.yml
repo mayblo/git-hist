@@ -3,66 +3,101 @@ name: CAS CLI - Windows x64 smoke test
 on:
   workflow_dispatch:
     inputs:
-      job_id:
-        description: "GitLab job ID that produced the artifact"
-        required: true
-      artifact_path:
-        description: "Path to file inside the job's artifacts"
-        required: true
-        default: "windows_amd64/build/cas.tgz"
-      repo_ref:
-        description: "Branch/ref to checkout as the scan directory"
-        required: true
-        default: "dev"
+      directory:
+        description: 'Path to scan (relative to repo, or absolute Windows path)'
+        required: false
+        default: '.'
+      repo_id:
+        description: 'Repo ID'
+        required: false
+        default: 'test/may'
+      branch:
+        description: 'Branch'
+        required: false
+        default: 'dev'
+      start_commit:
+        description: 'Start commit SHA'
+        required: false
+        default: '74d51d7a11a89e678722ea62b52e908b181dee76'
+      source:
+        description: 'Source'
+        required: false
+        default: 'GIT_HOOK'
 
 permissions:
   contents: read
-
-env:
-  # Adjust these to your GitLab instance/project
-  GITLAB_HOST: "https://gitlab.xdr.pan.local"
-  PROJECT: "xdr%2Fcas%2Fcas"   # URL-encoded: xdr/cas/cas -> xdr%2Fcas%2Fcas
 
 jobs:
   win-amd64:
     runs-on: windows-latest
     timeout-minutes: 30
-
     steps:
-      - name: Checkout repo to scan (into git-hist)
+      - name: Checkout repo
         uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.repo_ref }}
-          path: git-hist
 
-      - name: Download CAS artifact from GitLab (by job ID)
+      - name: Verify cas.tgz exists at repo root
         shell: pwsh
-        env:
-          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}   # create this secret with at least read_api
         run: |
-          $headers = @{ "PRIVATE-TOKEN" = "$env:GITLAB_TOKEN" }
-          $jobId   = "${{ github.event.inputs.job_id }}"
-          $apath   = "${{ github.event.inputs.artifact_path }}"
-          $url     = "${{ env.GITLAB_HOST }}/api/v4/projects/${{ env.PROJECT }}/jobs/$jobId/artifacts/$apath"
-          Write-Host "Downloading: $url"
-          Invoke-WebRequest -Headers $headers -Uri $url -OutFile cas.tgz
+          if (-not (Test-Path .\cas.tgz)) {
+            Write-Error "cas.tgz not found at repo root."; exit 1
+          }
 
       - name: Extract cas.tgz
         shell: pwsh
         run: |
-          tar -xf cas.tgz
+          tar -xf .\cas.tgz
           if (-not (Test-Path .\exe\cas.exe) -and -not (Test-Path .\exe-arm\cas.exe)) {
             Write-Error "cas.exe not found after extraction (expected .\exe\cas.exe or .\exe-arm\cas.exe)."
             exit 1
           }
 
-      - name: Unblock downloaded files (remove Zone.Identifier)
+      - name: Unblock extracted files (remove Zone.Identifier)
         shell: pwsh
         run: |
           if (Test-Path .\exe)     { Get-ChildItem -Recurse .\exe     | Unblock-File }
           if (Test-Path .\exe-arm) { Get-ChildItem -Recurse .\exe-arm | Unblock-File }
 
-      - name: Sanity check layout
+      - name: Pick exe path
+        id: pick
         shell: pwsh
         run: |
-          Get-Chi
+          if     (Test-Path .\exe\cas.exe)     { "$env:CAS_EXE=.\exe\cas.exe"     | Out-File -FilePath $env:GITHUB_OUTPUT -Append }
+          elseif (Test-Path .\exe-arm\cas.exe) { "$env:CAS_EXE=.\exe-arm\cas.exe" | Out-File -FilePath $env:GITHUB_OUTPUT -Append }
+          else { Write-Error "cas.exe not found"; exit 1 }
+      - name: Sanity
+        shell: pwsh
+        run: |
+          Write-Host "Using ${{ steps.pick.outputs.CAS_EXE }}"
+          Get-ChildItem -Recurse (Split-Path -Parent "${{ steps.pick.outputs.CAS_EXE }}") | Select-Object FullName,Length
+
+      - name: Resolve scan directory
+        id: scandir
+        shell: pwsh
+        run: |
+          $inp = '${{ github.event.inputs.directory }}'
+          if ([string]::IsNullOrWhiteSpace($inp) -or $inp -eq '.') {
+            $full = (Resolve-Path .).Path
+          } elseif (Test-Path $inp) {
+            $full = (Resolve-Path $inp).Path
+          } else {
+            # Treat as relative to workspace
+            $full = (Resolve-Path (Join-Path $env:GITHUB_WORKSPACE $inp)).Path
+          }
+          "DIR=$full" | Out-File -FilePath $env:GITHUB_OUTPUT -Append
+          Write-Host "Scan directory: $full"
+
+      - name: Run CAS
+        shell: pwsh
+        env:
+          CAS_API_KEY: ${{ secrets.CAS_API_KEY }}   # <-- add this repo secret
+        run: |
+          Set-StrictMode -Version Latest
+          & "${{ steps.pick.outputs.CAS_EXE }}" `
+            --api-base-url "https://api-viso-ddk8ww8iuhyvvnnq5ayhr4.xdr-qa2-uat.us.paloaltonetworks.com" `
+            --api-key "$env:CAS_API_KEY" `
+            --auth-id 4 `
+            --repo-id "${{ github.event.inputs.repo_id }}" `
+            --branch "${{ github.event.inputs.branch }}" `
+            --directory "${{ steps.scandir.outputs.DIR }}" `
+            --source "${{ github.event.inputs.source }}" `
+            --start-commit "${{ github.event.inputs.start_commit }}"
