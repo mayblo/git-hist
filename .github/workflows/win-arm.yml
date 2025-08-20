@@ -15,14 +15,14 @@ jobs:
       - name: Download CAS windows_arm64 artifact
         shell: powershell
         run: |
-          Get-ChildItem -Recurse .\exe | Unblock-File
+          Get-ChildItem -Recurse .\exe-arm | Unblock-File
 
       - name: Run CAS (windows_arm64)
         shell: powershell
         env:
           API_KEY: ${{ secrets.CAS_API_KEY }}
         run: |
-          .\exe\cas.exe `
+          .\exe-arm\cas.exe `
             --api-base-url https://api-viso-ddk8ww8iuhyvvnnq5ayhr4.xdr-qa2-uat.us.paloaltonetworks.com `
             --api-key "$env:API_KEY" `
             --auth-id 4 `
