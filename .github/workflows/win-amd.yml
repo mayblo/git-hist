@@ -15,7 +15,7 @@ on:
       branch:
         description: 'Branch'
         required: false
-        default: 'dev'
+        default: 'main'
       start_commit:
         description: 'Start commit SHA'
         required: false
