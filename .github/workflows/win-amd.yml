@@ -1,116 +1,36 @@
-name: CAS CLI - Windows x64 smoke test
+- name: Checkout repo (pull LFS files)
+  uses: actions/checkout@v4
+  with:
+    ref: ${{ github.ref_name }}
+    lfs: true            # <-- THIS is the key
 
-on:
-  # Manual run
-  workflow_dispatch:
-    inputs:
-      directory:
-        description: 'Path to scan (relative or absolute Windows path)'
-        required: false
-        default: '.'
-      repo_id:
-        description: 'Repo ID'
-        required: false
-        default: 'test/may'
-      branch:
-        description: 'Branch'
-        required: false
-        default: 'main'
-      start_commit:
-        description: 'Start commit SHA'
-        required: false
-        default: '74d51d7a11a89e678722ea62b52e908b181dee76'
-      source:
-        description: 'Source'
-        required: false
-        default: 'GIT_HOOK'
+- name: Verify cas.tgz is real (not an LFS pointer)
+  shell: pwsh
+  run: |
+    if (-not (Test-Path .\cas.tgz)) {
+      Write-Error "cas.tgz not found at repo root."; exit 1
+    }
+    Get-Item .\cas.tgz | Format-List FullName,Length
+    # LFS pointer files start with this line
+    $first = Get-Content .\cas.tgz -TotalCount 1 -ErrorAction SilentlyContinue
+    if ($first -match '^version https://git-lfs.github.com/spec') {
+      Write-Error "cas.tgz is a Git LFS pointer (not the real archive). actions/checkout must use 'lfs: true'."
+      exit 1
+    }
 
-  # Auto-run on push
-  push:
-    branches: [ main ]             # <- change to your branch(es), e.g. [ dev, main ]
-    paths:
-      - 'cas.tgz'                 # run when the artifact changes
-      - '.github/workflows/win-amd.yml'
-      - 'git-hist/**'             # or any other paths that should trigger a run
+- name: Extract cas.tgz
+  shell: pwsh
+  run: |
+    # List contents (helps debugging) then extract
+    tar -tzf .\cas.tgz | Select-Object -First 10
+    tar -xzf .\cas.tgz
+    if (-not (Test-Path .\exe\cas.exe) -and -not (Test-Path .\exe-arm\cas.exe)) {
+      Write-Error "cas.exe not found after extraction (expected .\exe\cas.exe or .\exe-arm\cas.exe)."
+      exit 1
+    }
 
-permissions:
-  contents: read
-
-jobs:
-  win-amd64:
-    runs-on: windows-latest
-    timeout-minutes: 30
-
-    steps:
-      - name: Checkout repo
-        uses: actions/checkout@v4
-
-      - name: Verify cas.tgz exists at repo root
-        shell: pwsh
-        run: |
-          if (-not (Test-Path .\cas.tgz)) {
-            Write-Error "cas.tgz not found at repo root."; exit 1
-          }
-
-      - name: Extract cas.tgz
-        shell: pwsh
-        run: |
-          tar -xf .\cas.tgz
-          if (-not (Test-Path .\exe\cas.exe) -and -not (Test-Path .\exe-arm\cas.exe)) {
-            Write-Error "cas.exe not found after extraction (expected .\exe\cas.exe or .\exe-arm\cas.exe)."
-            exit 1
-          }
-
-      - name: Unblock extracted files
-        shell: pwsh
-        run: |
-          if (Test-Path .\exe)     { Get-ChildItem -Recurse .\exe     | Unblock-File }
-          if (Test-Path .\exe-arm) { Get-ChildItem -Recurse .\exe-arm | Unblock-File }
-
-      - name: Pick exe path
-        id: pick
-        shell: pwsh
-        run: |
-          if     (Test-Path .\exe\cas.exe)     { "CAS_EXE=.\exe\cas.exe"     | Out-File -Append -FilePath $env:GITHUB_OUTPUT }
-          elseif (Test-Path .\exe-arm\cas.exe) { "CAS_EXE=.\exe-arm\cas.exe" | Out-File -Append -FilePath $env:GITHUB_OUTPUT }
-          else { Write-Error "cas.exe not found"; exit 1 }
-
-      - name: Resolve scan directory
-        id: scandir
-        if: ${{ github.event_name == 'workflow_dispatch' }}
-        shell: pwsh
-        run: |
-          $inp = '${{ github.event.inputs.directory }}'
-          if ([string]::IsNullOrWhiteSpace($inp) -or $inp -eq '.') {
-            $full = (Resolve-Path .).Path
-          } elseif (Test-Path $inp) {
-            $full = (Resolve-Path $inp).Path
-          } else {
-            $full = (Resolve-Path (Join-Path $env:GITHUB_WORKSPACE $inp)).Path
-          }
-          "DIR=$full" | Out-File -Append -FilePath $env:GITHUB_OUTPUT
-
-      - name: Default scan directory on push
-        id: scandir_default
-        if: ${{ github.event_name == 'push' }}
-        shell: pwsh
-        run: |
-          "DIR=$((Resolve-Path .).Path)" | Out-File -Append -FilePath $env:GITHUB_OUTPUT
-
-      - name: Run CAS
-        shell: pwsh
-        env:
-          CAS_API_KEY: ${{ secrets.CAS_API_KEY }}   # add in repo settings
-        run: |
-          $dir = '${{ steps.scandir.outputs.DIR }}'
-          if ([string]::IsNullOrWhiteSpace($dir)) { $dir = '${{ steps.scandir_default.outputs.DIR }}' }
-
-          & "${{ steps.pick.outputs.CAS_EXE }}" `
-            --api-base-url "https://api-viso-ddk8ww8iuhyvvnnq5ayhr4.xdr-qa2-uat.us.paloaltonetworks.com" `
-            --api-key "$env:CAS_API_KEY" `
-            --auth-id 4 `
-            --repo-id "${{ github.event.inputs.repo_id || 'test/may' }}" `
-            --branch "${{ github.event.inputs.branch   || 'dev' }}" `
-            --directory "$dir" `
-            --source "${{ github.event.inputs.source   || 'GIT_HOOK' }}" `
-            --start-commit "${{ github.event.inputs.start_commit || '74d51d7a11a89e678722ea62b52e908b181dee76' }}"
+- name: Unblock extracted files
+  shell: pwsh
+  run: |
+    if (Test-Path .\exe)     { Get-ChildItem -Recurse .\exe     | Unblock-File }
+    if (Test-Path .\exe-arm) { Get-ChildItem -Recurse .\exe-arm | Unblock-File }
