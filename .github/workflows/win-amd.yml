@@ -1,78 +1,68 @@
-# .github/workflows/cas-win-amd64.yml
 name: CAS CLI - Windows x64 smoke test
 
 on:
-   workflow_dispatch: {}
-  push:
-    branches: [ dev ]               # <- change as you like (e.g., main)
-    paths:
-      - '.github/workflows/cas-win-amd64.yml'
-      - 'git-hist/**'               # or any paths you want to watch
+  workflow_dispatch:
+    inputs:
+      job_id:
+        description: "GitLab job ID that produced the artifact"
+        required: true
+      artifact_path:
+        description: "Path to file inside the job's artifacts"
+        required: true
+        default: "windows_amd64/build/cas.tgz"
+      repo_ref:
+        description: "Branch/ref to checkout as the scan directory"
+        required: true
+        default: "dev"
 
 permissions:
   contents: read
 
 env:
-  # ---- Adjust these 4 to your environment ----
+  # Adjust these to your GitLab instance/project
   GITLAB_HOST: "https://gitlab.xdr.pan.local"
-  PROJECT: "xdr%2Fcas%2Fcas"                 # URL-encoded project path: xdr/cas/cas -> xdr%2Fcas%2Fcas
-  JOB_ID: "28431308"                         # the GitLab job ID that produced the artifact
-  ARTIFACT_PATH: "windows_amd64/build/cas.tgz"
-  # --------------------------------------------
+  PROJECT: "xdr%2Fcas%2Fcas"   # URL-encoded: xdr/cas/cas -> xdr%2Fcas%2Fcas
 
 jobs:
   win-amd64:
     runs-on: windows-latest
     timeout-minutes: 30
+
     steps:
-      - name: Check out the repo to scan (branch dev) into git-hist
+      - name: Checkout repo to scan (into git-hist)
         uses: actions/checkout@v4
         with:
-          ref: dev
+          ref: ${{ github.event.inputs.repo_ref }}
           path: git-hist
 
       - name: Download CAS artifact from GitLab (by job ID)
         shell: pwsh
         env:
-          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}   # create this secret with a PAT that has read_api
+          GITLAB_TOKEN: ${{ secrets.GITLAB_TOKEN }}   # create this secret with at least read_api
         run: |
-          $Headers = @{ "PRIVATE-TOKEN" = "$env:GITLAB_TOKEN" }
-          $Url = "$env:GITLAB_HOST/api/v4/projects/$env:PROJECT/jobs/$env:JOB_ID/artifacts/$env:ARTIFACT_PATH"
-          Write-Host "GET $Url"
-          Invoke-WebRequest -Headers $Headers -Uri $Url -OutFile cas.tgz
+          $headers = @{ "PRIVATE-TOKEN" = "$env:GITLAB_TOKEN" }
+          $jobId   = "${{ github.event.inputs.job_id }}"
+          $apath   = "${{ github.event.inputs.artifact_path }}"
+          $url     = "${{ env.GITLAB_HOST }}/api/v4/projects/${{ env.PROJECT }}/jobs/$jobId/artifacts/$apath"
+          Write-Host "Downloading: $url"
+          Invoke-WebRequest -Headers $headers -Uri $url -OutFile cas.tgz
 
       - name: Extract cas.tgz
         shell: pwsh
         run: |
           tar -xf cas.tgz
-          if (-not (Test-Path .\exe\cas.exe)) {
-            Write-Error "Expected .\exe\cas.exe after extraction but not found."; exit 1
+          if (-not (Test-Path .\exe\cas.exe) -and -not (Test-Path .\exe-arm\cas.exe)) {
+            Write-Error "cas.exe not found after extraction (expected .\exe\cas.exe or .\exe-arm\cas.exe)."
+            exit 1
           }
 
-      - name: Unblock downloaded files (remove ZoneIdentifier)
+      - name: Unblock downloaded files (remove Zone.Identifier)
         shell: pwsh
         run: |
-          Get-ChildItem -Recurse .\exe | Unblock-File
+          if (Test-Path .\exe)     { Get-ChildItem -Recurse .\exe     | Unblock-File }
+          if (Test-Path .\exe-arm) { Get-ChildItem -Recurse .\exe-arm | Unblock-File }
 
-      - name: Sanity check
+      - name: Sanity check layout
         shell: pwsh
         run: |
-          Get-ChildItem -Recurse .\exe | Select-Object FullName, Length
-          $os = (Get-CimInstance Win32_OperatingSystem).OSArchitecture
-          Write-Host "Runner OS arch: $os"
-
-      - name: Run CAS (windows_amd64)
-        shell: pwsh
-        env:
-          CAS_API_KEY: ${{ secrets.CAS_API_KEY }}     # add this secret
-        run: |
-          Set-StrictMode -Version Latest
-          .\exe\cas.exe `
-            --api-base-url "https://api-viso-ddk8ww8iuhyvvnnq5ayhr4.xdr-qa2-uat.us.paloaltonetworks.com" `
-            --api-key "$env:CAS_API_KEY" `
-            --auth-id 4 `
-            --repo-id "test/may" `
-            --branch "dev" `
-            --directory "${{ github.workspace }}\git-hist" `
-            --source "GIT_HOOK" `
-            --start-commit "74d51d7a11a89e678722ea62b52e908b181dee76"
+          Get-Chi
