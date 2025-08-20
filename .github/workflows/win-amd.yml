@@ -16,15 +16,7 @@ jobs:
       - name: Unblock files (remove SmartScreen/Zone.Identifier)
         shell: powershell
         run: |
-          Get-ChildItem -Recurse .\exe | Unblock-File
-
-      - name: Sanity (show arch and layout)
-        shell: powershell
-        run: |
-          $os = (Get-CimInstance Win32_OperatingSystem).OSArchitecture
-          Write-Host "OS arch: $os"
-          Get-ChildItem .\exe
-          Get-Item .\exe\cas.exe | Format-List *
+          Get-ChildItem -Recurse .\exe-amd | Unblock-File
 
       - name: Run CAS (windows_amd64)
         shell: powershell
@@ -32,7 +24,7 @@ jobs:
           API_KEY: ${{ secrets.CAS_API_KEY }}
         run: |
           Set-StrictMode -Version Latest
-          .\exe\cas.exe `
+          .\exe-amd\cas.exe `
             --api-base-url https://api-viso-ddk8ww8iuhyvvnnq5ayhr4.xdr-qa2-uat.us.paloaltonetworks.com `
             --api-key "$env:API_KEY" `
             --auth-id 4 `
