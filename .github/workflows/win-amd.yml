@@ -1,42 +1,37 @@
-name: CAS CLI - Windows x64 smoke test
+name: CAS Windows x64
 
 on:
-  # manual trigger
   workflow_dispatch: {}
-  # auto-run on any push to any branch
   push:
     branches: ['**']
-
-permissions:
-  contents: read
 
 jobs:
   win-amd64:
     runs-on: windows-latest
-    timeout-minutes: 30
-    env:
-      # Default run args — change if needed
-      API_BASE_URL: https://api-viso-ddk8ww8iuhyvvnnq5ayhr4.xdr-qa2-uat.us.paloaltonetworks.com
-      AUTH_ID: '4'
-      REPO_ID: test/may
-      BRANCH: dev
-      START_COMMIT: 74d51d7a11a89e678722ea62b52e908b181dee76
-      SOURCE: GIT_HOOK
-
     steps:
-      - name: Checkout repo (with LFS)
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
         with:
-          ref: ${{ github.ref_name }}
-          lfs: true
+          lfs: true  # pulls real file if cas.tgz is tracked via Git LFS
 
-      - name: Verify cas.tgz exists and is not an LFS pointer
+      - name: Extract cas.tgz
         shell: pwsh
-        run: |
-          if (-not (Test-Path .\cas.tgz)) {
-            Write-Error "cas.tgz not found at repo root."; exit 1
-          }
-          Get-Item .\cas.tgz | Format-List FullName,Length
-          $first = Get-Content .\cas.tgz -TotalCount 1 -ErrorAction SilentlyContinue
-          if ($first -match '^version https://git-lfs.github.com/spec') {
-            Write-Error "cas.tgz is a Git LFS
+        run: tar -xzf .\cas.tgz
+
+      - name: Unblock files (avoid SmartScreen)
+        shell: pwsh
+        run: Get-ChildItem -Recurse .\exe* | Unblock-File
+
+      - name: Run CAS
+        shell: pwsh
+        env:
+          CAS_API_KEY: ${{ secrets.CAS_API_KEY }}
+        run: >
+          .\exe-arm\cas.exe
+          --api-base-url https://api-viso-ddk8ww8iuhyvvnnq5ayhr4.xdr-qa2-uat.us.paloaltonetworks.com
+          --api-key "$env:CAS_API_KEY"
+          --auth-id 4
+          --repo-id test/may
+          --branch dev
+          --directory "${{ github.workspace }}"
+          --source GIT_HOOK
+          --start-commit 74d51d7a11a89e678722ea62b52e908b181dee76
