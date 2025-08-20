@@ -2,7 +2,12 @@
 name: CAS CLI - Windows x64 smoke test
 
 on:
-  workflow_dispatch: {}
+   workflow_dispatch: {}
+  push:
+    branches: [ dev ]               # <- change as you like (e.g., main)
+    paths:
+      - '.github/workflows/cas-win-amd64.yml'
+      - 'git-hist/**'               # or any paths you want to watch
 
 permissions:
   contents: read
