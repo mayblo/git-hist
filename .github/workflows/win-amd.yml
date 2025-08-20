@@ -1,36 +1,42 @@
-- name: Checkout repo (pull LFS files)
-  uses: actions/checkout@v4
-  with:
-    ref: ${{ github.ref_name }}
-    lfs: true            # <-- THIS is the key
+name: CAS CLI - Windows x64 smoke test
 
-- name: Verify cas.tgz is real (not an LFS pointer)
-  shell: pwsh
-  run: |
-    if (-not (Test-Path .\cas.tgz)) {
-      Write-Error "cas.tgz not found at repo root."; exit 1
-    }
-    Get-Item .\cas.tgz | Format-List FullName,Length
-    # LFS pointer files start with this line
-    $first = Get-Content .\cas.tgz -TotalCount 1 -ErrorAction SilentlyContinue
-    if ($first -match '^version https://git-lfs.github.com/spec') {
-      Write-Error "cas.tgz is a Git LFS pointer (not the real archive). actions/checkout must use 'lfs: true'."
-      exit 1
-    }
+on:
+  # manual trigger
+  workflow_dispatch: {}
+  # auto-run on any push to any branch
+  push:
+    branches: ['**']
 
-- name: Extract cas.tgz
-  shell: pwsh
-  run: |
-    # List contents (helps debugging) then extract
-    tar -tzf .\cas.tgz | Select-Object -First 10
-    tar -xzf .\cas.tgz
-    if (-not (Test-Path .\exe\cas.exe) -and -not (Test-Path .\exe-arm\cas.exe)) {
-      Write-Error "cas.exe not found after extraction (expected .\exe\cas.exe or .\exe-arm\cas.exe)."
-      exit 1
-    }
+permissions:
+  contents: read
 
-- name: Unblock extracted files
-  shell: pwsh
-  run: |
-    if (Test-Path .\exe)     { Get-ChildItem -Recurse .\exe     | Unblock-File }
-    if (Test-Path .\exe-arm) { Get-ChildItem -Recurse .\exe-arm | Unblock-File }
+jobs:
+  win-amd64:
+    runs-on: windows-latest
+    timeout-minutes: 30
+    env:
+      # Default run args — change if needed
+      API_BASE_URL: https://api-viso-ddk8ww8iuhyvvnnq5ayhr4.xdr-qa2-uat.us.paloaltonetworks.com
+      AUTH_ID: '4'
+      REPO_ID: test/may
+      BRANCH: dev
+      START_COMMIT: 74d51d7a11a89e678722ea62b52e908b181dee76
+      SOURCE: GIT_HOOK
+
+    steps:
+      - name: Checkout repo (with LFS)
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref_name }}
+          lfs: true
+
+      - name: Verify cas.tgz exists and is not an LFS pointer
+        shell: pwsh
+        run: |
+          if (-not (Test-Path .\cas.tgz)) {
+            Write-Error "cas.tgz not found at repo root."; exit 1
+          }
+          Get-Item .\cas.tgz | Format-List FullName,Length
+          $first = Get-Content .\cas.tgz -TotalCount 1 -ErrorAction SilentlyContinue
+          if ($first -match '^version https://git-lfs.github.com/spec') {
+            Write-Error "cas.tgz is a Git LFS
