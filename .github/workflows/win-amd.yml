@@ -27,7 +27,7 @@ on:
 
   # Auto-run on push
   push:
-    branches: [ dev ]             # <- change to your branch(es), e.g. [ dev, main ]
+    branches: [ main ]             # <- change to your branch(es), e.g. [ dev, main ]
     paths:
       - 'cas.tgz'                 # run when the artifact changes
       - '.github/workflows/win-amd.yml'
